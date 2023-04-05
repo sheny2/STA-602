@@ -1,0 +1,293 @@
+---
+title: 'STA 602 Lab 4'
+author: "Yicheng Shen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, message=F, warning=F, echo=F}
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(rstanarm)
+library(magrittr)
+library(rstan)
+library(bayesplot)
+library(loo)
+library(readxl)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "60%", fig.align = 'center')
+```
+
+***
+```{r}
+create_df <- function(post_draws, prior_draws){
+  post_draws <- data.frame(post_draws)
+  post_draws$distribution <- "posterior"
+  
+  prior_draws <- data.frame(prior_draws)
+  colnames(prior_draws) <- "alpha"
+  prior_draws$distribution <- "prior"
+  
+  dat <- rbind(post_draws, prior_draws)
+  return(dat)
+}
+set.seed(689934)
+
+alpha <- 1   
+beta <- -0.25 
+sigma <- 1    
+
+N <- 5
+x <- array(runif(N, 0, 2), dim=N)                    
+y <- array(rnorm(N, beta * x + alpha, sigma), dim=N)
+```
+
+```{r}
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x=x, N=N)
+fit.flat <- stan(file = "lab-04-flat_prior.stan", data = stan_dat, 
+                 chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=48)
+```
+
+```{r}
+alpha.flat <- as.matrix(fit.flat, pars = "alpha")
+beta.flat <- as.matrix(fit.flat, pars = "beta")
+ggplot(alpha.flat %>% as.data.frame, aes(x = alpha)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Posterior distribution of alpha under the flat prior")
+```
+```{r}
+print(fit.flat, pars = c("alpha", "beta"))
+```
+
+
+## Exercise 1
+
+$\pi(\alpha) \propto 1, \pi(\beta) \propto 1$
+
+$\pi(\theta|y)\propto  \pi(\theta)\pi(y|\theta)  \propto 1 \times N(X_i^\top\theta, \sigma^2)$
+
+Then we integrate the multivariate normal distribution to the marginal of $\alpha$ and $\beta$ posterior.
+
+```{r}
+post <- solve(t(x) %*% x) %*% t(x) %*% y
+```
+
+
+With posterior draws above, we can show that 
+
+Posterior mean for $\alpha$ is 0.78, with 95% CI from -2.61 to 3.96. 
+
+Posterior mean for $\beta$ is 0.32, with 95% CI from -2.03 to 2.79. 
+
+This is indeed pretty diffused. It is also not surprising since we are using a flat prior and with low sample size data. 
+
+Then we try the uniform prior (similiar behaviors)
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x=x, N=N, lb = -10, ub = 10)
+fit.unif <- stan(file = "lab-04-unif_prior.stan", data = stan_dat, 
+                 chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=48)
+```
+
+```{r, cache = T, warning=F}
+alpha.unif <- as.matrix(fit.unif, pars = c("alpha"))
+beta.unif <- as.matrix(fit.unif, pars = c("beta"))
+ggplot(alpha.unif %>% as.data.frame, aes(x = alpha)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Posterior distribution of alpha under the Uniform(-10, 10) prior")
+```
+
+```{r}
+print(fit.unif, pars = c("alpha"))
+```
+
+
+## Exercise 2
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x=x, N=N)
+fit.norm <- stan(file = "lab-04-normal_prior.stan", data = stan_dat, 
+                 chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=49)
+```
+```{r}
+alpha.norm<- as.matrix(fit.norm, pars = c("alpha"))
+ggplot(alpha.norm %>% as.data.frame, aes(x = alpha)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Posterior distribution of alpha under N(0,1) weakly informative prior")
+
+```
+
+```{r}
+print(fit.norm, pars = c("alpha", "beta"))
+```
+
+We can do similar tricks as above. Below is the result from the posterior draws.
+
+Posterior mean for $\alpha$ is 0.58, with 95% CI from -0.56 to 1.65. 
+
+Posterior mean for $\beta$ is 0.36, with 95% CI from -0.47 to 1.26. 
+
+Now we have tighter CI from posterior. This seems to be a more concentrated normal distribution. So our prior is informative (again since the sample size is tiny).
+
+
+## Exercise 3
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x=x, N=N)
+fit.cauchy <- stan(file = "lab-04-cauchy_prior.stan",data = stan_dat, 
+                   chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=55)
+```
+```{r}
+alpha.cauchy<- as.matrix(fit.cauchy, pars = c("alpha"))
+ggplot(alpha.cauchy %>% as.data.frame, aes(x = alpha)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Posterior distribution of alpha under Cauchy(0,1) weakly informative prior")
+```
+
+```{r}
+print(fit.cauchy, pars = c("alpha", "beta"))
+```
+
+```{r}
+plot_dat <- create_df(alpha.norm, alpha.cauchy) %>% 
+  mutate(distribution = if_else(distribution == "posterior", "Normal","Cauchy"))
+
+ggplot(plot_dat, aes(alpha, fill = distribution)) + 
+  geom_histogram(binwidth = 0.25, alpha = 0.7, position = "identity")+
+  geom_vline(xintercept = alpha) +
+  scale_fill_brewer()
+```
+
+
+Cauchy is more informative in a way it behaves heavy tails and puts more probability mass in the tails. But the difference is tiny. 
+
+
+```{r}
+alpha <- 5
+N <- 10
+x <- runif(N, 0, 2)                    
+y <- rnorm(N, beta * x + alpha, sigma)
+```
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x = x, N = N)
+fit.norm <- stan(file = "lab-04-normal_prior.stan", data = stan_dat, 
+                 chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=49)
+```
+
+```{r}
+alpha.norm<- as.matrix(fit.norm, pars = c("alpha"))
+prior_draws <- rnorm(1000, 0, 1)
+plot_dat <- create_df(alpha.norm, prior_draws)
+ggplot(plot_dat, aes(alpha, fill = distribution)) + 
+  geom_histogram(binwidth = 0.25, alpha = 0.7, position = "identity")+
+  geom_vline(xintercept = alpha) + scale_fill_brewer()
+```
+
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y, x = x, N = N)
+fit.cauchy <- stan(file = "lab-04-cauchy_prior.stan",data = stan_dat, 
+                   chains = 1, refresh = 0, iter = 2000, warmup = 500, seed=55)
+```
+
+```{r, cache = T}
+alpha.cauchy<- as.matrix(fit.cauchy, pars = c("alpha"))
+prior_draws <- rcauchy(1000, 0, 1)
+prior_draws <- prior_draws[abs(prior_draws) < 25]
+plot_dat <- create_df(alpha.cauchy, prior_draws)
+ggplot(plot_dat, aes(alpha, fill = distribution)) + 
+  geom_histogram(binwidth = .5, alpha = 0.7, position = "identity")+
+  geom_vline(xintercept = alpha) +
+  scale_fill_brewer()
+```
+
+
+## Exercise 4
+
+In $N=5,\alpha=1$ case, $N(0,1)$ and $Cauchy(0,1)$ behaves similarly. Both priors are appropriate guesses considering the true $\alpha$ value is 1. Since the sample size is small compared with prior belief, the posterior is dominated by the prior and it is able to roughly cover the true value. The two posteriors are similar. 
+
+When $N=10,\alpha=5$, $Cauchy(0,1)$ is a much better choice than $N(0,1)$. The true $\alpha$ value is now away from the prior guesses, so priors are not that appropriate. And as the sample size grows relatively, $Cauchy(0,1)$ has heavy tails that allow the posterior to be adjusted by data and to capture the true value. 
+
+As sample size grows to be large enough, both priors are not that strong and the posterior would be dominated by the likelihood (data).
+
+## Exercise 5
+
+The heavier-tailed priors usually put more probability mass on the extreme values, thus allowing the posterior probably move far from the prior center. 
+
+If the sample size is small and we don’t have strong prior knowledge, we should consider to have heavier-tailed priors to allow the posterior to be adjusted by data. If we do have some firm belief, we might consider using light-tailed priors to strengthen our prior. 
+
+Again, if the sample size is pretty large, the different priors matter less since posterior is dominated by data. 
+
+
+## Exercise 6
+
+We should construct priors based on how much prior knowledge we have and whether we strongly trust our prior knowledge. If we lack a strong belief, we should prefer heavy-tailed priors in case that the true value is far away from our prior guess.  
+
+
+## Exercise 7
+
+```{r}
+theta <- runif(10000,0,1)
+hist(theta)
+```
+
+```{r}
+logit <- function(x){
+  ret <- log(x/(1-x))# finish function for log odds
+  return(ret)
+}
+eta <- logit(theta)
+hist(eta)
+```
+
+```{r}
+set.seed(123);
+theta <- 0.3;
+N <- 10;
+y <- rbinom(N, 1, theta)
+theta.mle <- sum(y)/N
+```
+
+```{r, cache = T, results="hide"}
+stan_dat <- list(y = y,N=N)
+fit.bayes.prob <- stan(file = "lab-04-prob.stan", data = stan_dat, refresh = 0, iter = 2000)
+```
+
+```{r}
+print(fit.bayes.prob, pars = c("theta", "eta"))
+hist(as.matrix(fit.bayes.prob, pars = "theta"), breaks = 50)
+```
+
+
+The output above verifies that posterior mean for $\theta$ is 0.42. 
+
+The mode of beta distribution (1+4, 1+6) is $\frac{a-1}{a+b-2} = \frac{5-1}{5+7-2} = 0.4$. 
+
+We can thus see that both theoretical and actual posterior draws show the mode is around 0.4 (simulated draws might vary a bit). 
+
+## Exercise 8
+
+Beta(0,0) is an improper prior (cannot integrate to 1), which usually leads to an improper posterior and that would not be appropriate to do Bayesian. 
+
+Nevertheless, sometimes we can use improper prior as long as we make sure that the posterior is proper. 
+
+## Exercise 9
+
+```{r, cache = T, results="hide", warning = F}
+fit.logodds <- stan(file = "lab-04-log_odds.stan", data = stan_dat, refresh = 0, iter = 2000)
+```
+
+```{r}
+print(fit.logodds, pars = c("theta", "eta"))
+```
+
+We have $\pi = \frac{\theta}{1-\theta}$ and $\theta = \frac{\pi}{1+\pi}$ then $\frac{\partial \pi}{\partial \theta} = \frac{1}{(\theta -1)^2}$
+
+Then $p(\theta) = 1 \times \frac{1}{(\theta -1)^2}$, which is still an improper posterior. 

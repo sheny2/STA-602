@@ -1,0 +1,121 @@
+---
+title: 'STA 602 Lab 1'
+author: "Yicheng Shen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, message=F, warning=F, echo=F}
+library(tidyverse)
+require(magrittr)
+require(plyr)
+library(tufte)
+library(knitr)
+library(gridExtra)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(fig.align = 'center')
+```
+
+Here's a list of resources for learning rmarkdown:
+
+1. [R markdown introduction](https://rmarkdown.rstudio.com/lesson-1.html)
+1. [R for Data Science](https://r4ds.had.co.nz/)
+1. [Introduction to R markdown](https://rmarkdown.rstudio.com/articles_intro.html)
+1. [Another introduction to R markdown](https://rpubs.com/andrew-cho/303981)
+1. [R markdown cheatshett](https://rstudio.com/wp-content/uploads/2015/02/rmarkdown-cheatsheet.pdf)
+1. [Data visualization with ggplot2 cheat sheet](https://rstudio.com/wp-content/uploads/2016/11/ggplot2-cheatsheet-2.1.pdf)
+1. [Learn LaTex in 30 minutes](https://www.overleaf.com/learn/latex/Learn_LaTeX_in_30_minutes)
+
+
+***
+
+## Exercise 1
+
+1. Create a code chunk and set the header parameter to TRUE and print out the top rows of the table with `head()` as above.
+
+```{r load_data_with_header, eval = T}
+data <- read.table(file = url("http://www2.stat.duke.edu/~pdh10/FCBS/Exercises/azdiabetes.dat"), 
+                   header = TRUE)
+head(data)
+```
+
+
+## Exercise 2
+
+2. Generate a sequence of $100$ equispaced real numbers from $0$ to $1$ and store it in a variable called `seq2`.
+
+```{r seq2, eval = T}
+seq2 <- seq(from = 0, to = 1, by = 1 / 99)  # If use 1/100 would give 101 numbers, so 1/99
+length(seq2)
+```
+
+
+## Exercise 3
+
+3. Sort the entries in `seq3` from greatest to least.
+
+```{r sort seq3, eval = T}
+seq3 <- seq(from = -3, to = 3, by = .5)
+sort(seq3, decreasing = T)
+```
+
+
+## Exercise 4
+
+4. Find the variance of each row of `mat5`
+
+```{r var, eval = T}
+mat5 <- matrix(seq(1, 100, 1), nrow = 4, ncol = 25, byrow = T)
+apply(X = mat5, MARGIN = 1, FUN = var)
+```
+
+
+## Exercise 5 
+
+5. Generate $500$ samples from a Beta distribution with shape parameter $[a, b] = [0.5, 0.5]$ and store the samples in a variable called `W`
+
+```{r rbeta, eval = T}
+set.seed(32507) 
+W <- rbeta(500, 0.5, 0.5) 
+head(W) # output is big hence not shown completely
+```
+
+
+## Exercise 6
+
+6. Browse online resources (some below), or use code from above to make a few plots of your own.
+
+```{r, out.width="90%", eval = T}
+set.seed(253)
+norm_samples <- rnorm(10000)
+
+a <- norm_samples %>%
+  data.frame(x = .) %>%
+  mutate(`x^2` = x^2, `x^3` = x^3, `abs(x)` = abs(x)) %>%
+  ggplot2::ggplot() + 
+  geom_point(aes(x,`x^2`),color = "blue") + 
+  geom_point(aes(x,`abs(x)`),color = "red") +
+  geom_point(aes(x,`x^3`),color = "orange") + 
+  labs(title = "Transformation of Normal Variable", y = "") + theme_bw()
+
+b <- norm_samples %>%
+  data.frame(x = .) %>%
+  mutate(`Cumulative Sums` = cumsum(x), time = 1:10000) %>%
+  ggplot2::ggplot() + geom_line(aes(time, `Cumulative Sums`)) +
+  labs(title = "Random Time Series Plot") + theme_bw()
+
+set.seed(466)
+norm_samples_2 <- rnorm(10000)
+poission_samples_2 <- rpois(10000, 10)
+
+c <- data.frame(x = norm_samples, y = norm_samples_2, z = poission_samples_2) %>%
+  ggplot2::ggplot() + geom_jitter(aes(x,y,color = z)) + 
+  labs(title = "Random Scatterplot") + theme_bw()
+
+d <- bayesrules::plot_beta_binomial(alpha = 20, beta = 20, y = 40, n = 100) +
+  labs(title = "Beta Binomial Model") + theme_bw()
+
+grid.arrange(a, b, c, d, nrow = 2)
+```
+***

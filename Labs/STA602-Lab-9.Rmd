@@ -1,0 +1,380 @@
+---
+title: 'STA 602 Lab 9'
+author: "Yicheng Shen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, message=F, warning=F, echo=F}
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(rstanarm)
+library(magrittr)
+library(rstan)
+library(bayesplot)
+library(loo)
+library(readxl)
+library(coda)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "75%", fig.align = 'center')
+```
+
+***
+
+```{r}
+data(Gcsemv, package = "mlmRev")
+dim(Gcsemv)
+summary(Gcsemv)
+
+# Make Male the reference category and rename variable
+Gcsemv$female <- relevel(Gcsemv$gender, "M")
+
+# Use only total score on coursework paper
+GCSE <- subset(x = Gcsemv,
+               select = c(school, student, female, course))
+
+# Count unique schools and students
+m <- length(unique(GCSE$school))
+N <- nrow(GCSE)
+```
+
+
+## Ex.1
+
+The histogram shows that depending on the school, the average `course` scores can vary a lot, with a slightly left skewed distribution. 
+
+```{r}
+GCSE %>% group_by(school) %>% summarise(sample_avg = mean(course, na.rm=T)) %>% 
+  ggplot() + geom_histogram(aes(x=sample_avg), bins = 25)
+```
+
+## Ex.2
+
+```{r}
+pooled <- stan_glm(course ~ 1 + female, data = GCSE, refresh = 0)
+unpooled <- stan_glm(course ~ -1 + school + female,data=GCSE, refresh = 0)
+```
+
+```{r}
+mod1 <- stan_lmer(formula = course ~ 1 + (1 | school),
+                  data = GCSE,
+                  seed = 349,
+                  refresh = 0)
+
+prior_summary(object = mod1)
+sd(GCSE$course, na.rm = T)
+```
+
+$\mu_\theta = 73.78, \tau = 8.888, \sigma = 13.821$
+
+```{r}
+print(mod1, digits = 3)
+```
+
+
+```{r}
+summary(mod1,
+        pars = c("(Intercept)", "sigma", "Sigma[school:(Intercept),(Intercept)]"),
+        probs = c(0.025, 0.975),
+        digits = 3)
+```
+
+The posterior estimates are $\mu_\theta = 73.78, \tau^2 = 79.004, \sigma = {13.821}$
+
+
+
+## Ex.3
+
+```{r, eval = F, echo = F}
+mod1_sims <- as.matrix(mod1)
+dim(mod1_sims)
+par_names <- colnames(mod1_sims)
+mu_theta_sims <- as.matrix(mod1, pars = "(Intercept)")
+omega_sim <- as.matrix(mod1,
+                        regex_pars ="b\\[\\(Intercept\\) school\\:")
+
+sig_sims <- as.matrix(mod1,
+                      pars = "sigma")
+tau2_sims <- as.matrix(mod1,
+                       pars = "Sigma[school:(Intercept),(Intercept)]")
+```
+```{r}
+# posterior samples of intercepts, which is overall intercept + school-specific intercepts
+int_sims <- as.numeric(mu_theta_sims) + omega_sim
+
+# posterior mean
+int_mean <- apply(int_sims, MARGIN = 2, FUN = mean)
+
+# credible interval
+int_ci <- apply(int_sims, MARGIN = 2, FUN = quantile, probs = c(0.025, 0.975))
+int_ci <- data.frame(t(int_ci))
+
+# combine into a single df
+int_df <- data.frame(int_mean, int_ci)
+names(int_df) <- c("post_mean","Q2.5", "Q97.5")
+
+# sort DF according to posterior mean
+int_df <- int_df[order(int_df$post_mean),]
+
+# create variable "index" to represent order
+int_df <- int_df %>% mutate(index = row_number())
+
+# plot posterior means of school-varying intercepts, along with 95 CIs
+ggplot(data = int_df, aes(x = index, y = post_mean))+
+  geom_pointrange(aes(ymin = Q2.5, ymax = Q97.5))+
+  scale_x_continuous("Index", breaks = seq(0,m, 5)) +
+  scale_y_continuous(expression(paste("varying intercept ", theta[j], " = ", mu[theta]+omega[j])))
+```
+
+
+Choose two schools, extract out the posterior samples of their average scores, and report on their difference in average scores with descriptive statistics, a histogram, and interpretation. 
+
+```{r}
+mod1_sims <- as.matrix(mod1)
+mu_theta_sims <- as.matrix(mod1, pars = "(Intercept)")
+omega_sim <- as.matrix(mod1,
+                        regex_pars ="b\\[\\(Intercept\\) school\\:227")
+
+int_sims <- as.numeric(mu_theta_sims) + omega_sim
+
+int_sims <- int_sims %>% as.data.frame() %>% 
+  mutate(difference = `b[(Intercept) school:22710]` - `b[(Intercept) school:22738]`)
+
+hist(int_sims$difference, breaks = 30)
+
+summary(int_sims$difference)
+quantile(int_sims$difference, c(0.025, 0.975))
+```
+
+I am looking at school 22710 and 22738. It seems that the score of school 22710 is usually higher, although the difference of their 95% CI contains zero, so the difference is not significant. 
+
+
+## Ex.4
+
+```{r}
+mod2 <- stan_lmer(formula = course ~ 1 + female + (1 | school),
+                  data = GCSE, 
+                  prior = normal(location = 0,
+                                        scale = 100,
+                                        autoscale = F),
+                  prior_intercept = normal(location = 0,
+                                        scale = 100,
+                                        autoscale = F),
+                  seed = 349,
+                  refresh = 0)
+
+# plot varying intercepts
+mod2.sims <- as.matrix(mod2)
+group_int <- mean(mod2.sims[,1])
+mp <- mean(mod2.sims[,2])
+bp <- apply(mod2.sims[, 3:75], 2, mean)
+xvals <- seq(0,1,.01)
+plot(x = xvals, y = rep(0, length(xvals)), 
+     ylim = c(50, 90), xlim = c(-0.1,1.1), xaxt = "n", xlab = "female", ylab = "course")
+axis(side = 1, at = c(0,1))
+for (bi in bp){
+  lines(xvals, (group_int + bi)+xvals*mp)
+}
+```
+
+```{r}
+summary(mod2,
+        pars = c("(Intercept)", "femaleF", "sigma", "Sigma[school:(Intercept),(Intercept)]"),
+        probs = c(0.025, 0.975),
+        digits = 3)
+```
+
+The posterior estimates are $\mu_\theta = 69.730, \beta = 6.754, \tau^2 = 81.438, \sigma = {13.420}$. 
+
+
+## Ex.5
+
+```{r}
+mod3 <- stan_lmer(formula = course~ 1+ female + (1 + female | school),
+                  data = GCSE,
+                  seed = 349,
+                  refresh = 0)
+mod3_sims <- as.matrix(mod3)
+
+# obtain draws for mu_theta
+mu_theta_sims <- as.matrix(mod3, pars = "(Intercept)")
+
+fem_sims <- as.matrix(mod3, pars = "femaleF")
+# obtain draws for each school's contribution to intercept
+omega_sims <- as.matrix(mod3,
+                        regex_pars ="b\\[\\(Intercept\\) school\\:")
+beta_sims <- as.matrix(mod3,
+                       regex_pars ="b\\[femaleF school\\:")
+
+int_sims <- as.numeric(mu_theta_sims) + omega_sims
+slope_sims <- as.numeric(fem_sims) + beta_sims
+
+# posterior mean
+slope_mean <- apply(slope_sims, MARGIN = 2, FUN = mean)
+
+# credible interval
+slope_ci <- apply(slope_sims, MARGIN = 2, FUN = quantile, probs = c(0.025, 0.975))
+slope_ci <- data.frame(t(slope_ci))
+
+# combine into a single df
+slope_df <- data.frame(slope_mean, slope_ci, levels(GCSE$school))
+names(slope_df) <- c("post_mean","Q2.5", "Q97.5", "school")
+
+# sort DF according to posterior mean
+slope_df <- slope_df[order(slope_df$post_mean),]
+
+# create variable "index" to represent order
+slope_df <- slope_df %>% mutate(index = row_number())
+
+# plot posterior means of school-varying slopes, along with 95% CIs
+ggplot(data = slope_df, aes(x = index, y = post_mean))+
+  geom_pointrange(aes(ymin = Q2.5, ymax = Q97.5))+
+  scale_x_continuous("Index", breaks = seq(1,m, 1),
+                     labels = slope_df$school) +
+  scale_y_continuous(expression(paste("varying slopes ", beta[j])))+
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r}
+loo1 <- loo(mod1)
+loo2 <- loo(mod2)
+loo3 <- loo(mod3)
+loo_compare(loo1,loo2,loo3)
+loo_compare(loo1, loo3)
+```
+
+```{r}
+pooled.sim <- as.matrix(pooled)
+unpooled.sim <- as.matrix(unpooled)
+m1.sim <- as.matrix(mod1)
+m2.sim <- as.matrix(mod2)
+m3.sim <- as.matrix(mod3)
+schools <- unique(GCSE$school)
+
+
+alpha2 = mean(m2.sim[,1])
+alpha3 <- mean(m3.sim[,1])
+
+partial.fem2 <- mean(m2.sim[,2])
+partial.fem3 <- mean(m3.sim[,2])
+unpooled.fem <- mean(unpooled.sim[,74])
+
+par(mfrow = c(2, 3), mar = c(1,2,2,1))
+for (i in 1:18){
+  temp = GCSE %>% filter(school == schools[i]) %>%
+    na.omit()
+  y <- temp$course
+  x <- as.numeric(temp$female)-1
+  plot(x + rnorm(length(x)) *0.001, y, ylim = c(35,101), xlab = "female",main =schools[i], xaxt = "n", ylab = "course")
+  axis(1,c(0,1),cex.axis=0.8)
+  
+  # no pooling
+  b = mean(unpooled.sim[,i])
+
+  # plot lines and data
+  xvals = seq(-0.1, 1.1, 0.01)
+  lines(xvals, xvals * mean(pooled.sim[,2]) + mean(pooled.sim[,1]), col = "red") # pooled
+  lines(xvals, xvals * unpooled.fem + b, col = "blue") # unpooled
+  lines(xvals, xvals*partial.fem2 + (alpha2 + mean(m2.sim[,i+2])) , col = "green") # varying int
+  lines(xvals, xvals*(partial.fem3 + mean(m3.sim[, 2 + i*2])) + (alpha3 + mean(m3.sim[, 1 + i*2])), col = "orange") # varying int and slope
+  legend("bottom", legend = paste("n =", length(y), " "))
+}
+
+```
+
+
+It seems that we want to prefer the random intercept and random slope model. 
+
+
+
+## Ex.6
+
+```{r}
+radon <- read.csv("radon.txt", header = T,sep="")
+radon$county <- as.factor(radon$county)
+```
+```{r}
+ggplot(radon) + geom_boxplot(aes(factor(county), log_radon))
+```
+
+
+Yes, a hierarchical model here makes sense, with the county as the grouping variable. From the EDA we can see that the `log_radon` differs quite a lot across counties. 
+
+## Ex.7
+
+
+```{r, eval = T, warning=F}
+radon.unpooled <- stan_glm(log_radon ~ -1 + county, data=radon, refresh = 0)
+radon.mod1 <- stan_lmer(formula = log_radon ~ 1 + (1 | county),
+                  data = radon,
+                  seed = 8848,
+                  refresh = 0)
+```
+
+```{r, eval = T}
+n_county <- as.numeric(table(radon$county))
+create_df <- function(sim,model){
+  mean <- apply(sim,2,mean)
+  sd <- apply(sim,2,sd)
+  df <- cbind(n_county, mean, sd) %>%
+    as.data.frame()%>%
+    mutate(se = sd/ sqrt(n_county), model = model)
+  return(df)
+}
+```
+
+```{r, eval = T, warning=F}
+unpooled.sim <- as.matrix(radon.unpooled)
+unpooled.df <- create_df(unpooled.sim[,1:85], model = "unpooled")
+
+mod1.sim <- as.matrix(radon.mod1)[,1:86]
+mod1.sim <- (mod1.sim[,1] + mod1.sim)[,-1]
+partial.df <- create_df(mod1.sim, model = "partial")
+
+ggplot(rbind(unpooled.df, partial.df)%>% 
+         mutate(model = factor(model, levels = c("unpooled", "partial"))), 
+       aes(x= n_county, y = mean)) +
+      geom_jitter() +
+      geom_errorbar(aes(ymin=mean-2*se, ymax= mean+2*se), width=.1)+
+  ylim(0,3)+
+  xlim(0,60)+
+  geom_hline(aes(yintercept= mean(coef(radon.unpooled))))+
+  facet_wrap(~model)
+```
+
+
+## Ex.8
+
+```{r}
+radon.mod2 <- stan_lmer(formula = log_radon ~ 1 +floor + (1 | county),
+                  data = radon,
+                  seed = 8848,
+                  refresh = 0)
+radon.mod3 <- stan_lmer(formula = log_radon ~ 1 +floor + (1 + floor | county),
+                  data = radon,
+                  seed = 8848,
+                  refresh = 0)
+radon.mod4 <- stan_lmer(formula = log_radon ~ 1 +floor + log_uranium + (1 | county),
+                  data = radon,
+                  seed = 8848,
+                  refresh = 0)
+```
+
+```{r, warning=F}
+loo_compare(
+  loo(radon.unpooled),
+  loo(radon.mod1),
+  loo(radon.mod2),
+  loo(radon.mod3),
+  loo(radon.mod4)
+)
+```
+
+
+According to the predictive accuracy by the difference, I'd prefer mod 4, which is a random intercept model with `floor` and `log_uranium` as the fixed effects. 
+
+
+## Ex.9 
+
+Some groups (counties, schools, etc.) have quite small sample sizes (only 2 or 3 observations) in the data. If we purely rely on the samples from those small groups, our estimates will have very high variances due to low sample sizes. Therefore a hierarchical structure allows us to borrow information from the overall estimates (shrinkage) and trade a bit bias for reduction of variance. If there are lots of observations in a group, then the shrinkage would be very small, allowing more sufficient data to dominate the posterior estimates. 

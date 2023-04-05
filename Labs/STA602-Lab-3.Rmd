@@ -1,0 +1,170 @@
+---
+title: 'STA 602 Lab 3'
+author: "Yicheng Shen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, message=F, warning=F, echo=F}
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(rstanarm)
+library(magrittr)
+library(rstan)
+library(bayesplot)
+library(loo)
+library(readxl)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "60%", fig.align = 'center')
+```
+
+***
+
+## Exercise 1
+
+```{r}
+GoT <- readxl::read_xlsx("GoT_Deaths.xlsx", col_names = T)
+hist(GoT$Count, breaks = 15)
+```
+
+
+## Exercise 2
+
+```{r, eval = T}
+y <- GoT$Count
+n <- length(y)
+
+# Finish: obtain empirical mean
+ybar <- mean(y)
+sim_dat <- rpois(n, ybar)
+a <- qplot(sim_dat, bins = 20, xlab = "Simulated number of deaths", fill = I("#9ecae1"))
+
+df <- data.frame(rbind(data.frame(y, "observed") %>% dplyr::rename(data = 1, type = 2),
+            data.frame(sim_dat, "simulated") %>% dplyr::rename(data = 1, type = 2)))
+b <- ggplot(df, aes(x = data, fill = type))+
+  geom_histogram(position = "dodge", bins = 20) +
+  scale_fill_brewer()  +
+  labs(x = "Number of deaths", y = "Count")
+
+grid.arrange(a,b, nrow =1)
+```
+
+```{r, cache=TRUE, warning=FALSE, results='hide'}
+set.seed(8848)
+stan_dat <- list(y = y, N = n)
+fit <- stan("lab-03-poisson-simple.stan", data = stan_dat, refresh = 0, chains = 2)
+lambda_draws <- as.matrix(fit, pars = "lambda")
+```
+
+```{r}
+mcmc_areas(lambda_draws, prob = 0.90)
+mean(GoT$Count) # sample mean
+print(fit, pars = "lambda")
+```
+*Answer*: The sample mean from data is 4.013699, which is quite coherent with the posterior mean. The posterior mean is still higher than the sample mean because it is a compromise between prior and data, and the prior mean is 5. 
+
+
+## Exercise 3
+
+```{r, eval=T, echo = T}
+y_rep <- as.matrix(fit, pars = "y_rep")  
+
+set.seed(8848)
+posterior_sample_draw <- list()
+for (i in seq_along(lambda_draws))
+{
+  posterior_sample_draw[[i]] <- rpois(n, lambda_draws[i])
+}
+y_rep <- matrix(unlist(posterior_sample_draw), 
+                nrow = length(lambda_draws), ncol = n, byrow = T)
+```
+
+## Exercise 4
+
+```{r, message=F, out.width="85%", warning=F}
+a<-ppc_hist(y, y_rep[1:8, ], binwidth = 1)
+b<-ppc_dens_overlay(y, y_rep[1:60, ])
+
+prop_zero <- function(x){
+  mean(x == 0)
+} 
+prop_zero(y) ##  0.164
+c<-ppc_stat(y, y_rep, stat = "prop_zero")
+d<-ppc_stat_2d(y, y_rep, stat = c("mean", "var"))
+grid.arrange(a,b,c,d,nrow=2)
+ppc_error_hist(y, y_rep[1:4, ], binwidth = 1) + xlim(-15, 15)
+```
+
+*Answer*: It is clear that the model does not fit the data perfectly since the observed data seems to be very a unusual datapoint among the posterior sample draws. 
+
+## Exercise 5
+
+```{r, cache = T, warning = F, results='hide'}
+set.seed(8848)
+fit2 <- stan("lab-03-poisson-hurdle.stan", data = stan_dat, refresh = 0, chains = 2)
+```
+
+```{r}
+# Extract the sampled values for lambda, and store them in a variable called lambda_draws2:
+lambda_draws2 <- as.matrix(fit2, pars = "lambda")
+# Compare
+lambdas <- cbind(lambda_fit1 = lambda_draws[, 1],
+                 lambda_fit2 = lambda_draws2[, 1])
+# Shade 90% interval
+mcmc_areas(lambdas, prob = 0.9) 
+```
+
+```{r}
+y_rep2 <- as.matrix(fit2, pars = "y_rep")
+```
+
+
+## Exercise 6
+
+```{r, message=F, out.width="85%", warning=F}
+a<-ppc_hist(y, y_rep2[1:8, ], binwidth = 1)
+b<-ppc_dens_overlay(y, y_rep2[1:60, ])
+c<-ppc_stat(y, y_rep2, stat = "prop_zero")
+d<-ppc_stat_2d(y, y_rep2, stat = c("mean", "var"))
+grid.arrange(a,b,c,d,nrow=2)
+ppc_error_hist(y, y_rep2[1:4, ], binwidth = 1) + xlim(-15, 15)
+```
+*Answer*: This model is a much better fit since the observed data lies reasonably within the posterior draws. 
+
+
+## Exercise 7
+
+```{r}
+log_lik1 <- extract_log_lik(fit, merge_chains = FALSE)
+r_eff1 <- relative_eff(exp(log_lik1)) 
+(loo1 <- loo(log_lik1, r_eff = r_eff1))
+
+log_lik2 <- extract_log_lik(fit2, merge_chains = FALSE)
+r_eff2 <- relative_eff(exp(log_lik2)) 
+(loo2 <- loo(log_lik2, r_eff = r_eff2))
+
+loo_compare(loo1, loo2)
+```
+
+*Answer*: `model2` is a better fit here considering its smaller prediction error. 
+
+
+## Exercise 8
+
+*Answer*: If our model is a reasonable fit, then we should see that the observed data lies reasonably among the simulated draws from posterior.
+
+PPC is important because it helps us check whether our model could generate something similar to the observed data. If not, then our model is does not fit well. 
+
+
+## Exercise 9
+
+*Answer*: The second model should be a good fit for the data. Based on PPC, the observed data is a reasonably close to the posterior draws. It is also shown that the model fits data with smaller LOOCV error. 
+
+
+## Exercise 10
+
+*Answer*: A single LOOCV error may not be enough to confidently choose a model (we might want to compare it with some other model's error). 
+However, it is still useful in a way that we know whether the observed data is far from the fitted model's draws or not.  
+
+***

@@ -1,0 +1,175 @@
+---
+title: 'STA 602 Lab 2'
+author: "Yicheng Shen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+---
+
+```{r setup, message=F, warning=F, echo=F}
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(magrittr)
+library(plyr)
+library(tufte)
+library(knitr)
+library(gridExtra)
+library(rstanarm)
+library(rstan)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(fig.align = 'center')
+```
+
+***
+
+## Exercise 1
+
+```{r}
+tumors <- read.csv(file = url("http://www.stat.columbia.edu/~gelman/book/data/rats.asc"),
+                     skip = 2, header = T, sep = " ")[,c(1,2)]
+y <- tumors$y
+N <- tumors$N
+n <- length(y)
+```
+
+```{r, eval = F}
+plot(seq(0, 1, length.out = 1000), 
+     dbeta(seq(0, 1, length.out = 1000), 1, 1), type = 'l', 
+     xlab = expression(theta), ylab = "Density",
+     main = "The Beta(1, 1) density")
+```
+
+```{r, results = "hide"}
+stan_dat <- list(n = n, N = N, y =y, a = 1, b = 1)
+fit_pool <- stan('lab-02-pool.stan',data = stan_dat,chains = 2,refresh = 0)
+pool_output <- rstan::extract(fit_pool)
+```
+
+```{r, out.width="70%", fig.align = "center"}
+mean(pool_output$theta)
+hist(pool_output$theta)
+```
+
+The distribution of $\theta$ seems approximately normal and centers around the mean of 0.155.
+
+
+## Exercise 2
+
+```{r, results = "hide"}
+stan_dat <- list(n = n, N = N, y =y, a = 1, b = 1)
+fit_nopool <- stan('lab-02-nopool.stan',data = stan_dat,chains = 2,refresh = 0)
+nopool_output <- rstan::extract(fit_nopool)
+```
+
+```{r, out.width="70%", fig.align = "center"}
+apply(nopool_output$theta, 2, mean)
+boxplot(nopool_output$theta)
+```
+
+We have 71 groups, therefore for each group we have a $\theta_i$. The visualization above shows posterior distribution of each of the 71 $\theta_i$. Each point is a point from the posterior density of $\theta_i$.
+
+
+## Exercise 3
+
+pool stan code: 
+
+```{r, eval = F}
+parameters { 
+  real<lower=0, upper=1> theta;  // chance of success (pooled) 
+} 
+```
+
+nopool stan code: 
+
+```{r, eval = F}
+parameters { 
+  vector<lower=0, upper=1>[n] theta;  // chance of success (unpooled) 
+} 
+```
+
+The pool model uses `real` while the no pool code uses `vector` and `[n]`. The difference affects whether we view the groups behave independently (each group has varying parameter) or they share the same parameter. 
+
+
+## Exercise 4
+
+```{r, out.width="70%", fig.align = "center"}
+par(mfrow = c(4, 4))
+par(mar=c(2,2,2,2))
+for(a_val in c(1, 10, 25, 100)){
+  for(b_val in rev(c(1, 10, 25, 100))){
+    plot(seq(0, 1, length.out = 1000), 
+     dbeta(seq(0, 1, length.out = 1000), a_val, b_val),
+     type = 'l', 
+     xlab = expression(theta), ylab = "Density",
+     main = paste0("Beta(", a_val, ", ", b_val, ")"))
+  }
+}
+```
+
+
+```{r}
+output_list <- list()
+for(a_val in c(1, 10, 25, 100)){
+  for(b_val in c(1, 10, 25, 100)){
+    stan_dat <- list(n = n, N = N, y = y, a = a_val, b = b_val)
+    fit_pool <- stan('lab-02-pool.stan', data = stan_dat, chains = 2, refresh = 0)
+    output_list[[paste0("a_", a_val, ":b_", b_val)]] <- rstan::extract(fit_pool)[["theta"]]
+  }
+}
+```
+
+
+```{r, out.width="70%", fig.align = "center"}
+output_list %>%
+  plyr::ldply(function(theta){
+    reshape2::melt(theta) %>%
+      dplyr::mutate(post_mean = mean(theta))
+  }, .id = "prior") %>%
+  tidyr::separate("prior", into = c("a", "b"), sep = ":") %>%
+  dplyr::mutate(a = as.numeric(gsub("._", "", a)),
+                b = as.numeric(gsub("._", "", b))) %>%
+  ggplot2::ggplot() +
+  geom_density(aes(x = value)) +
+  geom_vline(aes(xintercept = post_mean)) +
+  facet_grid(a~factor(b, levels = rev(c(1, 10, 25, 100)))) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(x = expression(theta), y = "Density")
+```
+
+
+a represents the number of successes in prior observations, b represents the number of failures in the prior observations. 
+
+## Exercise 5
+
+```{r, out.width="70%", fig.align = "center"}
+a <- ggplot(tumors) + geom_point(aes(x = N, y = y))
+b <- ggplot(tumors) + geom_point(aes(x = N, y = y / N))
+grid.arrange(a, b, nrow = 1)
+tumors %>% summarise(proportion = mean(y/N))
+```
+
+In the `tumors` data, we observe a relatively low proportion of successes compared with failures. The overall average $\frac{y}{N}$ is 0.1381151. 
+
+
+## Exercise 6
+
+Most prior beliefs (represented by a and b) are not very close to the data, but a Beta(1,10) or Beta(10,100) prior may be a close match to the data. 
+
+
+## Exercise 7
+
+```{r}
+# approach 1
+mle.1 <- sum(y)/sum(N)
+mle.1
+mean(pool_output$theta)
+
+# approach 2
+mle.2 <- y/N
+mle.2
+apply(nopool_output$theta, 2, mean)
+```
+
+As mentioned above, the posterior mean is a weighted average of the prior mean and the MLE. When our prior mean is determined by Beta(1,1), the posterior from Bayesian approach is close to the MLE. 
+
+***
