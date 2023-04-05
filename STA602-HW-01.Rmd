@@ -1,0 +1,143 @@
+---
+title: "STA 602. HW01"
+author: "Yicheng Shen"
+date: "9/1/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ProbBayes)
+library(bayesrules)
+library(knitr)
+library(BB)
+library(LearnBayes)
+library(tidyverse)
+library(runjags)
+library(rjags)
+library(coda)     
+library(bayesplot)
+library(coda)
+```
+
+
+# Q1.
+From Bayes Theorem, we know that $$P(A|B) = \frac{P(B|A)P(A)}{P(B)}$$
+In this case, we have that 
+\begin{align*}
+P(Knew|Correct) &= \frac{P(Correct|Knew)P(Knew)}{P(Correct)}\\
+&=  \frac{1 \times p}{1 \times p + \frac{1}{m} (1-p)}\\
+&= \frac{mp}{mp+1-p}
+\end{align*}
+
+
+# Q2.
+
+Let X and Y be the time of from 12pm to arrival of the the man and woman, respectively. 
+
+So, from the question we know that X and Y are both random variable with $X \sim Unif(0,60)$ and $Y \sim Unif(0,60)$. 
+
+Since their marginal pdf are both $1/60$ and they are independent events, their joint pdf is $$f(x,y) = \frac{1}{3600}$$
+So we first calculate the man waits for more than 10 mins: 
+$$P(X < Y - 10)  = \int_{10}^{60} \int_{0}^{y-10} \frac{1}{3600}  \,dx dy = \frac{25}{72}$$
+Similarly, we could get that $P(Y < X - 10) = \frac{25}{72}$ as well.
+
+Therefore, $P( |X-Y| > 10) = \frac{25}{36}$.
+
+
+# Q3.
+
+Since we know that $Z \sim N(0,1)$, we can write out the pdf: $$f(z) = \frac{1}{\sqrt {2\pi}} e^{-\frac{-z^2}{2}}$$
+Now by the definition of expected value (or first norm)
+\begin{align*}
+E[X] &= \int_{-\infty}^{\infty} x f(x)  \,dx \\
+&= \int_{x}^{\infty} x f(x)  \,dx  + \int_{-\infty}^{x} x f(x)  \,dx\\
+&= \int_{x}^{\infty} z f(z)  \,dz  + 0\\
+&= \int_{x}^{\infty} z \frac{1}{\sqrt {2\pi}} e^{-\frac{-z^2}{2}}  \,dz \\
+&= -\frac{1}{\sqrt {2\pi}}  e^{-\frac{-z^2}{2}} |^{\infty}_{x} \\
+&= \frac{1}{\sqrt {2\pi}}  e^{-\frac{-x^2}{2}} \\
+\end{align*}
+
+
+# Q4.
+
+Since X follows the Binomial(n, p), we can write out its pmf as $${n \choose x} p^x (1-p)^{n-x}$$
+Now we add the condition that U = p
+\begin{align*}
+f_X(x) &= {n \choose x} p^x (1-p)^{n-x} \\
+&= \int_{0}^{1} {n \choose x} p^x (1-p)^{n-x} \,dp \\
+&= {n \choose x} \int_{0}^{1} p^x (1-p)^{n-x} \,dp \\
+&= {n \choose x} \frac{x!(n-x)!}{(n+1)!} \\
+\end{align*}
+
+
+# Q5.
+
+(a) We can use the moment generating functions to prove
+
+First of all, since X and Y are both Poisson r.v., we know that $$M_{X}(t) = e^{\lambda_1 (e^t - 1)}, \ M_{Y}(t) = e^{\lambda_2 (e^t - 1)}$$
+
+To show the sum of their distribution: 
+\begin{align*}
+M_{X+Y}(t) &= E[e^{t(X+Y)}] \\
+ &= E[e^{t(X)}] E[e^{t(Y)}] \\ 
+ &= M_{X}(t)  M_{Y}(t)  \\
+&=e^{\lambda_1 (e^t - 1)}  e^{\lambda_2 (e^t - 1)} \\ 
+&=e^{(\lambda_1+\lambda_2)(e^t - 1)}
+\end{align*}
+
+So we have shown that their sum is still a Poisson distribution with parameter $\lambda = \lambda_1+\lambda_2$. 
+
+
+(b) By Bayes Theorem used below, we would found that P(X|X+Y=n) follows a Binomial distribution. 
+\begin{align*}
+P(X = x|X+Y = n) &= \frac{P(X+Y = n|X = x)P(X = x)}{P(X+Y = n)} \\
+ &= \frac{P(Y = n - x)P(X = x)}{\frac{(\lambda_1+\lambda_2)^n e^{-(\lambda_1+\lambda_2)}}{n!}} \\ 
+ &= \frac{ \frac{(\lambda_2)^{n-x} e^{-(\lambda_2)}}{(n-x)!} \frac{(\lambda_1)^x e^{-(\lambda_1)}}{x!}}{\frac{(\lambda_1+\lambda_2)^n e^{-(\lambda_1+\lambda_2)}}{n!}} \\
+ &= \frac{n!}{(n-x)!x!} (\lambda_2)^{n-x} (\lambda_1)^{x} / (\lambda_1+\lambda_2)^n \\
+  &= \frac{n!}{(n-x)!x!} (\frac{\lambda_2}{\lambda_1+\lambda_2})^{n-x} (\frac{\lambda_1}{\lambda_1+\lambda_2})^{x} \\  &= \frac{1}{n+1}
+\end{align*}
+
+
+
+# Q6.
+
+Since Y follows a uniform distribution with Unif(0,X)
+$$E(Y|X) = \frac{X}{2}; Var(Y|X) = \frac{X^2}{12}$$
+Then we want to compute the unconditional ones, by Law of total expectation: 
+$$E(Y) = E(E(Y|X)) = E(\frac{X}{2}) = \frac{1}{4}$$
+For Variance, we can use the Law of total variance: 
+\begin{align*}
+Var(Y) &= E(Var(Y|X))  + Var(E(Y|X)) \\
+&= E(\frac{X^2}{12}) + Var(\frac{X}{2}) \\
+&= \frac{1}{12} E(X^2) + \frac{1}{4}Var(X) \\ 
+&= \frac{1}{12} \frac{1}{3} + \frac{1}{4} \frac{1}{12} \\ 
+&= \frac{1}{12} \frac{1}{3} + \frac{1}{4} \frac{1}{12} \\ 
+&= \frac{7}{144}
+\end{align*}
+
+
+# Q7.
+
+(a) The table of joint distribution is shown below.
+
+ Table  | X = 1  |  X = 0|  
+------- |------ | ---------- | 
+ Y =  1| (0.5)(0.4) = 0.2   |  (0.5)(0.6) = 0.3      
+ Y =  0| (0.5)(0.6) = 0.3   |   (0.5)(0.4) = 0.2         
+     
+(b) From the table we have $$E[Y] = E[Y|X=1] + E[Y|X=0] = 0.2 + 0.3 = 0.5$$
+(c) It can be noticed that Var[Y] is the larger one. Intuitively, knowing X as the condition will give us more information and thus reduce the amount of variability. 
+\begin{align*}
+Var[Y |X = 0] &= E[Y^2 |X = 0] - (E[Y |X = 0])^2 \\
+&= 1^2* 0.6 - (1*0.6)^2 = 0.24 \\
+Var[Y |X = 1] &= E[Y^2 |X = 1] - (E[Y |X = 1])^2 \\
+&= 1^2* 0.4 - (1*0.4)^2 = 0.24 \\ 
+Var[Y] &= E[Y^2] - (E[Y])^2 \\
+&= 0.5 - (1*0.5)^2 = 0.25 \\ 
+\end{align*}
+(d) Using Bayes Theorem: $$P(X=0|Y=1) = \frac{P(X=0, Y=1)}{P(Y=1)} = 0.3/(0.3+0.2) = 0.6$$
+
+
+
